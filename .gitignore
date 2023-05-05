@@ -12,3 +12,5 @@ device.json
 *.session
 *.device.json
 *.log
+
+.gradle/
