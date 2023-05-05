@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package obj;
+option java_package = "rijq.framework.obj";
+option java_multiple_files = true;
+
+message LoginEvent {
+  int64 uid = 1;
+}
+
+message FriendMessageEvent {
+  repeated int32 seqs = 1;
+  repeated int32 rands = 2;
+  int64 target = 3;
+  int32 time = 4;
+  int64 from_uin = 5;
+  string from_nick = 6;
+  repeated MessageElement elements = 7;
+}
+
+message GroupMessageEvent {
+  repeated int32 seqs = 1;
+  repeated int32 rands = 2;
+  int64 group_code = 3;
+  string group_name = 4;
+  string group_card = 5;
+  int64 from_uin = 6;
+  int32 time = 7;
+  repeated MessageElement elements = 8;
+}
+
+message MessageElement {
+  string elementType = 1;
+  bytes elementData = 2;
+}
+
+message Text {
+  string content = 1;
+}
+
+message At {
+  int64 target = 1;
+  string display = 2;
+}
+
+message Face {
+  int32 index = 1;
+  string name = 2;
+}
+
+message MarketFace {
+  string name = 1;
+  bytes face_id = 2;
+  int32 tab_id = 3;
+  int32 item_type = 4;
+  int32 sub_type = 5;
+  int32 media_type = 6;
+  bytes encrypt_key = 7;
+  string magic_value = 8;
+}
+
+message Dice {
+  int32 value = 1;
+}
+
+message FriendImage {
+  string res_id = 1;
+  string file_path = 2;
+  bytes md5 = 3;
+  uint32 size = 4;
+  uint32 width = 5;
+  uint32 height = 6;
+  int32 image_type = 7;
+  string orig_url = 8;
+  string download_path = 9;
+  bool flash = 10;
+}
+
+message GroupImage {
+  string file_path = 1;
+  int64 file_id = 2;
+  uint32 size = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+  bytes md5 = 6;
+  string orig_url = 7;
+  int32 image_type = 8;
+  bytes signature = 9;
+  uint32 server_ip = 10;
+  uint32 server_port = 11;
+  bool flash = 12;
+}
+
+message VideoFile {
+  string name = 1;
+  bytes uuid = 2;
+  int32 size = 3;
+  int32 thumb_size = 4;
+  bytes md5 = 5;
+  bytes thumb_md5 = 6;
+}
+
+message SendFriendMessage {
+  int64 target = 1;
+  repeated MessageElement elements = 2;
+}

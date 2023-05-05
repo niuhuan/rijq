@@ -1,0 +1,14 @@
+target/
+
+.DS_Store
+
+*.iml
+.idea/
+
+build/
+out/
+
+device.json
+*.session
+*.device.json
+*.log

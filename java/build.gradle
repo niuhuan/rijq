@@ -1,0 +1,61 @@
+buildscript {
+	repositories {
+		maven { url 'https://maven.aliyun.com/repository/central' }
+		maven { url 'https://maven.aliyun.com/repository/google' }
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.0.6'
+	id 'io.spring.dependency-management' version '1.1.0'
+	id "com.google.protobuf" version "0.9.2"
+}
+
+group = 'rijq'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '17'
+
+repositories {
+	maven { url 'https://maven.aliyun.com/repository/central' }
+	maven { url 'https://maven.aliyun.com/repository/google' }
+	mavenCentral()
+}
+
+dependencies {
+	implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.19.6'
+	implementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.19.6'
+	implementation 'org.springframework.boot:spring-boot-starter'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+tasks.named("bootJar") {
+	enabled = false
+}
+
+tasks.named("jar") {
+	archiveClassifier = ''
+	enabled = true
+}
+
+
+protobuf{
+	protoc {
+		artifact = "com.google.protobuf:protoc:3.19.1"
+	}
+}
+
+sourceSets {
+	main{
+		proto {
+			srcDirs "../protos"
+		}
+	}
+}
+

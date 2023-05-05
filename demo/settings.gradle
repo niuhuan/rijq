@@ -1,0 +1,4 @@
+rootProject.name = 'runner'
+
+include ':framework'
+project(':framework').projectDir = new File('../java')
