@@ -55,7 +55,7 @@ public class LogModule {
 环境准备
 
 1. rust nightly latest
-2. java 17
+2. java 17 (Spring3)
 
 在项目运行以下命令
 

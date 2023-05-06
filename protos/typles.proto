@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package enums;
+option java_package = "rijq.framework.obj.enums";
+option java_multiple_files = true;
+
+enum ElementType {
+  Unknown = 0;
+  Text = 1;
+  At = 2;
+  Face = 3;
+  MarketFace = 4;
+  Dice = 5;
+  FriendImage = 6;
+  GroupImage = 7;
+  VideoFile = 8;
+}
+

@@ -5,6 +5,7 @@ use bytes::{Buf, BufMut};
 use rand::seq::IteratorRandom;
 use ricq::client::Token;
 use ricq::ext::common::after_login;
+use ricq::handler::QEvent;
 use ricq::{
     LoginDeviceLocked, LoginNeedCaptcha, LoginResponse, LoginSuccess, LoginUnknownStatus,
     QRCodeConfirmed, QRCodeImageFetch, QRCodeState, RQError, RQResult,
@@ -16,10 +17,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
-pub(crate) async fn run_ricq(c: Arc<ricq::Client>) -> Result<()> {
+pub(crate) async fn run_ricq(
+    c: Arc<ricq::Client>,
+    _sender: Arc<UnboundedSender<QEvent>>,
+) -> Result<()> {
     tracing::info!("开始运行客户端");
     // 连接到服务器
     let mut handle = connection(c.clone()).await?;

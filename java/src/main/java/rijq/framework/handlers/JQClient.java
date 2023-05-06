@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 import rijq.framework.obj.MessageElement;
 import rijq.framework.obj.SendFriendMessage;
 import rijq.framework.obj.Text;
+import rijq.framework.obj.enums.ElementType;
 
 @Component
 public class JQClient {
@@ -23,7 +24,7 @@ public class JQClient {
                 SendFriendMessage.newBuilder()
                         .setTarget(uin)
                         .addElements(MessageElement.newBuilder()
-                                .setElementType("Text")
+                                .setElementType(ElementType.Text)
                                 .setElementData(Text.newBuilder().setContent(text).build().toByteString()))
                         .build().toByteArray()
         );

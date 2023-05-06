@@ -1,13 +1,13 @@
 use std::io::Cursor;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::run::run_ricq;
 use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::signature::{Primitive, ReturnType};
 use jni::sys::jlong;
 use jni::JNIEnv;
-use lazy_static::lazy_static;
 use prost::Message;
 use ricq::handler::QEvent;
 use ricq::version::ANDROID_WATCH;
@@ -16,15 +16,18 @@ use ricq_core::msg::MessageChain;
 use ricq_core::protocol::device::Device;
 use tokio::runtime::Runtime;
 
-use crate::run::run_ricq;
-
 mod obj {
     include!(concat!(env!("OUT_DIR"), "/obj.rs"));
+    pub(crate) use super::enums;
 }
+mod enums {
+    include!(concat!(env!("OUT_DIR"), "/enums.rs"));
+}
+mod log;
 mod run;
 
 struct JHandler {
-    sender: tokio::sync::mpsc::UnboundedSender<QEvent>,
+    sender: Arc<tokio::sync::mpsc::UnboundedSender<QEvent>>,
 }
 
 #[async_trait::async_trait]
@@ -40,9 +43,7 @@ pub extern "system" fn Java_rijq_framework_handlers_InitRunner_daemon(
     mut env: JNIEnv,
     runner: JObject,
 ) {
-    // 初始化日志
-    let lock = INIT.lock().unwrap();
-    drop(lock);
+    log::init_log_once();
     // 提示daemon启动
     tracing::info!("daemon start");
     // 启动runtime
@@ -56,11 +57,18 @@ pub extern "system" fn Java_rijq_framework_handlers_InitRunner_daemon(
     tracing::info!("runtime init");
     // 初始化channel，启动ricq
     let (sender, mut r) = tokio::sync::mpsc::unbounded_channel::<QEvent>();
+    let sender = Arc::new(sender);
     let device = runtime.block_on(device());
-    let client = ricq::Client::new(device, ANDROID_WATCH, JHandler { sender });
+    let client = ricq::Client::new(
+        device,
+        ANDROID_WATCH,
+        JHandler {
+            sender: sender.clone(),
+        },
+    );
     let client = Arc::new(client);
     let c1 = client.clone();
-    let _ = runtime.spawn(async move { run_ricq(c1).await.unwrap() });
+    let _ = runtime.spawn(async move { run_ricq(c1, sender).await.unwrap() });
     // 获取env,runtime,client的指针, 并传递给InitRunner
     let env_point = &env as *const JNIEnv as i64;
     println!("got env_point : {env_point}");
@@ -269,26 +277,13 @@ pub extern "system" fn Java_rijq_framework_handlers_InitRunner_callNative(
     }
 }
 
-lazy_static! {
-    static ref INIT: Mutex<()> = {
-        init_tracing_subscriber();
-        Mutex::new(())
-    };
-}
-
-fn init_tracing_subscriber() {
-    println!("logger init");
-    tracing_subscriber::fmt::init();
-    tracing::info!("logger hello");
-}
-
 fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
     let mut vc = vec![];
     for element in chain {
         match element {
             RQElem::At(at) => {
                 vc.push(obj::MessageElement {
-                    element_type: "At".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::At),
                     element_data: obj::At {
                         target: at.target,
                         display: at.display,
@@ -298,7 +293,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             RQElem::Text(text) => {
                 vc.push(obj::MessageElement {
-                    element_type: "Text".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::Text),
                     element_data: obj::Text {
                         content: text.content,
                     }
@@ -307,7 +302,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             RQElem::Face(face) => {
                 vc.push(obj::MessageElement {
-                    element_type: "Face".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::Face),
                     element_data: obj::Face {
                         index: face.index,
                         name: face.name,
@@ -317,7 +312,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             RQElem::MarketFace(market_face) => {
                 vc.push(obj::MessageElement {
-                    element_type: "MarketFace".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::MarketFace),
                     element_data: obj::MarketFace {
                         name: market_face.name,
                         face_id: market_face.face_id,
@@ -333,13 +328,13 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             RQElem::Dice(dice) => {
                 vc.push(obj::MessageElement {
-                    element_type: "Dice".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::Dice),
                     element_data: obj::Dice { value: dice.value }.encode_to_vec(),
                 });
             }
             RQElem::FriendImage(friend_image) => {
                 vc.push(obj::MessageElement {
-                    element_type: "FriendImage".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::FriendImage),
                     element_data: obj::FriendImage {
                         res_id: friend_image.res_id,
                         file_path: friend_image.file_path,
@@ -357,7 +352,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             RQElem::GroupImage(group_image) => {
                 vc.push(obj::MessageElement {
-                    element_type: "GroupImage".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::GroupImage),
                     element_data: obj::GroupImage {
                         file_path: group_image.file_path,
                         file_id: group_image.file_id,
@@ -378,7 +373,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             RQElem::FlashImage(flash_image) => match flash_image {
                 FlashImage::FriendImage(friend_image) => {
                     vc.push(obj::MessageElement {
-                        element_type: "FriendImage".to_string(),
+                        element_type: i32::from(obj::enums::ElementType::FriendImage),
                         element_data: obj::FriendImage {
                             res_id: friend_image.res_id,
                             file_path: friend_image.file_path,
@@ -396,7 +391,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
                 }
                 FlashImage::GroupImage(group_image) => {
                     vc.push(obj::MessageElement {
-                        element_type: "GroupImage".to_string(),
+                        element_type: i32::from(obj::enums::ElementType::GroupImage),
                         element_data: obj::GroupImage {
                             file_path: group_image.file_path,
                             file_id: group_image.file_id,
@@ -417,7 +412,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             },
             RQElem::VideoFile(video_file) => {
                 vc.push(obj::MessageElement {
-                    element_type: "VideoFile".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::VideoFile),
                     element_data: obj::VideoFile {
                         name: video_file.name,
                         uuid: video_file.uuid,
@@ -431,7 +426,7 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             }
             _ => {
                 vc.push(obj::MessageElement {
-                    element_type: "Unknown".to_string(),
+                    element_type: i32::from(obj::enums::ElementType::Unknown),
                     element_data: vec![],
                 });
             }
@@ -443,13 +438,9 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
 fn map_send(elements: Vec<obj::MessageElement>) -> MessageChain {
     let mut chain = MessageChain::default();
     for x in elements {
-        match x.element_type.as_str() {
-            "Text" => {
-                let text =
-                    obj::Text::decode(&mut Cursor::new(x.element_data)).expect("Text decode");
-                chain.push(ricq_core::msg::elem::Text::new(text.content));
-            }
-            _ => {}
+        if x.element_type == i32::from(obj::enums::ElementType::Text) {
+            let text = obj::Text::decode(&mut Cursor::new(x.element_data)).expect("Text decode");
+            chain.push(ricq_core::msg::elem::Text::new(text.content));
         }
     }
     chain
