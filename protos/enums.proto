@@ -16,3 +16,13 @@ enum ElementType {
   VideoFile = 8;
 }
 
+enum SendTargetType {
+  Friend = 0;
+  Group = 1;
+}
+
+enum ResultType {
+  Success = 0;
+  Fail = 1;
+}
+

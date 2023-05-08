@@ -1,5 +1,6 @@
 package rijq.framework.handlers;
 
+import com.google.protobuf.ByteString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -9,9 +10,11 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import rijq.framework.annotaions.Handler;
 import rijq.framework.annotaions.Module;
+import rijq.framework.obj.CallNativeResult;
 import rijq.framework.obj.FriendMessageEvent;
 import rijq.framework.obj.GroupMessageEvent;
 import rijq.framework.obj.LoginEvent;
+import rijq.framework.obj.enums.ResultType;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -125,16 +128,20 @@ public class InitRunner implements ApplicationRunner {
         this.client_point = client_point;
     }
 
-    private native void callNative(long env_point, long runtime_point, long client_point, String messageType, byte[] message);
+    private native CallNativeResult callNative(long env_point, long runtime_point, long client_point, String messageType, byte[] message);
 
-    protected void callNative(String messageType, byte[] message) {
-        callNative(
+    protected ByteString callNative(String messageType, byte[] message) {
+        var result = callNative(
                 this.env_point,
                 this.runtime_point,
                 this.client_point,
                 messageType,
                 message
         );
+        if (result.getCode() != ResultType.Success) {
+            throw new RuntimeException(result.getMessage());
+        }
+        return result.getData();
     }
 
     private native void daemon();

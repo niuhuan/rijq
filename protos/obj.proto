@@ -4,7 +4,7 @@ package obj;
 option java_package = "rijq.framework.obj";
 option java_multiple_files = true;
 
-import "typles.proto";
+import "enums.proto";
 
 message LoginEvent {
   int64 uid = 1;
@@ -110,4 +110,16 @@ message SendFriendMessage {
 message SendElement {
   enums.ElementType elementType = 1;
   bytes elementData = 2;
+}
+
+message UploadImageDto {
+  enums.SendTargetType targetType = 1;
+  int64 target = 2;
+  bytes data = 3;
+}
+
+message CallNativeResult {
+  enums.ResultType code = 1;
+  string message = 2;
+  bytes data = 3;
 }

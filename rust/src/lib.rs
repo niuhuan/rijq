@@ -1,24 +1,26 @@
-use std::io::Cursor;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
-
-use crate::run::run_ricq;
 use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::signature::{Primitive, ReturnType};
-use jni::sys::jlong;
+use jni::sys::{jlong, jvalue};
 use jni::JNIEnv;
 use prost::Message;
 use ricq::handler::QEvent;
 use ricq::version::ANDROID_WATCH;
-use ricq_core::msg::elem::{FlashImage, RQElem};
+use ricq_core::msg::elem::{FlashImage, FriendImage, GroupImage, RQElem};
 use ricq_core::msg::MessageChain;
 use ricq_core::protocol::device::Device;
+use std::default::Default;
+use std::io::Cursor;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::runtime::Runtime;
 
+use crate::run::run_ricq;
+
 mod obj {
-    include!(concat!(env!("OUT_DIR"), "/obj.rs"));
     pub(crate) use super::enums;
+
+    include!(concat!(env!("OUT_DIR"), "/obj.rs"));
 }
 mod enums {
     include!(concat!(env!("OUT_DIR"), "/enums.rs"));
@@ -246,12 +248,10 @@ pub extern "system" fn Java_rijq_framework_handlers_InitRunner_callNative(
     _client_point: jlong,
     _message_type: JString,
     _message: JByteArray,
-) {
-    println!("callNative : {_env_point}, {_runtime_point}, {_client_point}");
+) -> jvalue {
+    tracing::debug!("callNative : {_env_point}, {_runtime_point}, {_client_point}");
     let runtime = unsafe { &*(_runtime_point as *const Runtime) };
     let client = unsafe { &*(_client_point as *const Arc<ricq::Client>) };
-    runtime.spawn(async {});
-    println!("123");
     // _message_type 转换成 str
     let message_type: String = _env
         .get_string(&_message_type)
@@ -262,19 +262,130 @@ pub extern "system" fn Java_rijq_framework_handlers_InitRunner_callNative(
         .convert_byte_array(_message)
         .expect("Couldn't get java byte array!")
         .into();
+    // log
+    tracing::debug!("callNative : {message_type}");
+    // process
     match message_type.as_str() {
         "SendFriendMessage" => {
             let message: obj::SendFriendMessage =
-                obj::SendFriendMessage::decode(&mut Cursor::new(message))
-                    .expect("SendFriendMessage decode error");
+                match obj::SendFriendMessage::decode(&mut Cursor::new(message)) {
+                    Ok(message) => message,
+                    Err(err) => {
+                        return fail_result(
+                            _env,
+                            vec!["parse SendFriendMessage error", err.to_string().as_str()],
+                        );
+                    }
+                };
             let target = message.target;
             let message = map_send(message.elements);
-            runtime
+            return match runtime
                 .block_on(async move { client.send_friend_message(target, message).await })
-                .expect("send friend message error");
+            {
+                Ok(_) => encode_result(
+                    _env,
+                    obj::CallNativeResult {
+                        code: obj::enums::ResultType::Success as i32,
+                        ..Default::default()
+                    },
+                ),
+                Err(err) => fail_result(
+                    _env,
+                    vec!["SendFriendMessage error", err.to_string().as_str()],
+                ),
+            };
         }
-        _ => {}
+        "UploadImage" => {
+            let message: obj::UploadImageDto =
+                match obj::UploadImageDto::decode(&mut Cursor::new(message)) {
+                    Ok(message) => message,
+                    Err(err) => {
+                        return fail_result(
+                            _env,
+                            vec!["parse UploadImageDto error", err.to_string().as_str()],
+                        );
+                    }
+                };
+            return if message.target_type == obj::enums::SendTargetType::Friend as i32 {
+                match runtime.block_on(async move {
+                    client
+                        .upload_friend_image(message.target, message.data.as_slice())
+                        .await
+                }) {
+                    Ok(img) => success_result(_env, map_friend_image(img, false)),
+                    Err(err) => {
+                        fail_result(_env, vec!["UploadImage error", err.to_string().as_str()])
+                    }
+                }
+            } else if message.target_type == obj::enums::SendTargetType::Group as i32 {
+                match runtime.block_on(async move {
+                    client
+                        .upload_group_image(message.target, message.data.as_slice())
+                        .await
+                }) {
+                    Ok(img) => success_result(_env, map_group_image(img, false)),
+                    Err(err) => {
+                        fail_result(_env, vec!["UploadImage error", err.to_string().as_str()])
+                    }
+                }
+            } else {
+                fail_result(_env, vec!["unknown target type"])
+            };
+        }
+        _ => fail_result(_env, vec!["unknown message type"]),
     }
+}
+
+fn success_result<S>(env: JNIEnv, messages: S) -> jvalue
+where
+    S: prost::Message,
+{
+    encode_result(
+        env,
+        obj::CallNativeResult {
+            code: obj::enums::ResultType::Fail as i32,
+            data: messages.encode_to_vec(),
+            ..Default::default()
+        },
+    )
+}
+
+fn fail_result<S>(env: JNIEnv, messages: Vec<S>) -> jvalue
+where
+    S: AsRef<str>,
+{
+    encode_result(
+        env,
+        obj::CallNativeResult {
+            code: obj::enums::ResultType::Fail as i32,
+            message: {
+                let mut message = String::new();
+                for m in messages {
+                    message.push_str(m.as_ref());
+                    message.push_str(". ");
+                }
+                message
+            },
+            ..Default::default()
+        },
+    )
+}
+
+fn encode_result(mut env: JNIEnv, result: obj::CallNativeResult) -> jvalue {
+    let data = result.encode_to_vec();
+    let call_native_class = env
+        .find_class("rijq/framework/obj/CallNativeResult")
+        .unwrap();
+    let data = env.byte_array_from_slice(data.as_slice()).unwrap();
+    let de = env
+        .call_static_method(
+            &call_native_class,
+            "parseFrom",
+            "([B)Lrijq/framework/obj/CallNativeResult;",
+            &[(&data).into()],
+        )
+        .unwrap();
+    return de.as_jni();
 }
 
 fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
@@ -335,78 +446,26 @@ fn map_elements(chain: MessageChain) -> Vec<obj::MessageElement> {
             RQElem::FriendImage(friend_image) => {
                 vc.push(obj::MessageElement {
                     element_type: i32::from(obj::enums::ElementType::FriendImage),
-                    element_data: obj::FriendImage {
-                        res_id: friend_image.res_id,
-                        file_path: friend_image.file_path,
-                        md5: friend_image.md5,
-                        size: friend_image.size,
-                        width: friend_image.width,
-                        height: friend_image.height,
-                        image_type: friend_image.image_type,
-                        orig_url: friend_image.orig_url,
-                        download_path: friend_image.download_path,
-                        flash: false,
-                    }
-                    .encode_to_vec(),
+                    element_data: map_friend_image(friend_image, false).encode_to_vec(),
                 });
             }
             RQElem::GroupImage(group_image) => {
                 vc.push(obj::MessageElement {
                     element_type: i32::from(obj::enums::ElementType::GroupImage),
-                    element_data: obj::GroupImage {
-                        file_path: group_image.file_path,
-                        file_id: group_image.file_id,
-                        size: group_image.size,
-                        width: group_image.width,
-                        height: group_image.height,
-                        md5: group_image.md5,
-                        orig_url: group_image.orig_url.unwrap_or_default(),
-                        image_type: group_image.image_type,
-                        signature: group_image.signature,
-                        server_ip: group_image.server_ip,
-                        server_port: group_image.server_port,
-                        flash: false,
-                    }
-                    .encode_to_vec(),
+                    element_data: map_group_image(group_image, false).encode_to_vec(),
                 });
             }
             RQElem::FlashImage(flash_image) => match flash_image {
                 FlashImage::FriendImage(friend_image) => {
                     vc.push(obj::MessageElement {
                         element_type: i32::from(obj::enums::ElementType::FriendImage),
-                        element_data: obj::FriendImage {
-                            res_id: friend_image.res_id,
-                            file_path: friend_image.file_path,
-                            md5: friend_image.md5,
-                            size: friend_image.size,
-                            width: friend_image.width,
-                            height: friend_image.height,
-                            image_type: friend_image.image_type,
-                            orig_url: friend_image.orig_url,
-                            download_path: friend_image.download_path,
-                            flash: true,
-                        }
-                        .encode_to_vec(),
+                        element_data: map_friend_image(friend_image, true).encode_to_vec(),
                     });
                 }
                 FlashImage::GroupImage(group_image) => {
                     vc.push(obj::MessageElement {
                         element_type: i32::from(obj::enums::ElementType::GroupImage),
-                        element_data: obj::GroupImage {
-                            file_path: group_image.file_path,
-                            file_id: group_image.file_id,
-                            size: group_image.size,
-                            width: group_image.width,
-                            height: group_image.height,
-                            md5: group_image.md5,
-                            orig_url: group_image.orig_url.unwrap_or_default(),
-                            image_type: group_image.image_type,
-                            signature: group_image.signature,
-                            server_ip: group_image.server_ip,
-                            server_port: group_image.server_port,
-                            flash: true,
-                        }
-                        .encode_to_vec(),
+                        element_data: map_group_image(group_image, true).encode_to_vec(),
                     });
                 }
             },
@@ -444,4 +503,36 @@ fn map_send(elements: Vec<obj::MessageElement>) -> MessageChain {
         }
     }
     chain
+}
+
+fn map_friend_image(friend_image: FriendImage, flash: bool) -> obj::FriendImage {
+    obj::FriendImage {
+        res_id: friend_image.res_id,
+        file_path: friend_image.file_path,
+        md5: friend_image.md5,
+        size: friend_image.size,
+        width: friend_image.width,
+        height: friend_image.height,
+        image_type: friend_image.image_type,
+        orig_url: friend_image.orig_url,
+        download_path: friend_image.download_path,
+        flash,
+    }
+}
+
+fn map_group_image(group_image: GroupImage, flash: bool) -> obj::GroupImage {
+    obj::GroupImage {
+        file_path: group_image.file_path,
+        file_id: group_image.file_id,
+        size: group_image.size,
+        width: group_image.width,
+        height: group_image.height,
+        md5: group_image.md5,
+        orig_url: group_image.orig_url.unwrap_or_default(),
+        image_type: group_image.image_type,
+        signature: group_image.signature,
+        server_ip: group_image.server_ip,
+        server_port: group_image.server_port,
+        flash,
+    }
 }
